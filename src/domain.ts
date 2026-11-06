@@ -127,6 +127,20 @@ export function saveMemo(state: AppState, duplicate = false, now = new Date().to
 export function deleteMemo(state: AppState, id: string): AppState {
   return { ...state, memos: state.memos.filter(m => m.id !== id), history: state.history.map(t => ({ ...t, workIds: t.workIds.filter(w => w !== id) })), draft: { ...state.draft, memoId: state.draft.memoId === id ? null : state.draft.memoId } };
 }
+export type MemoDetails = Pick<Memo, 'title' | 'url' | 'note'>;
+export function updateMemoDetails(state: AppState, id: string, details: MemoDetails, now = new Date().toISOString()): AppState {
+  if (!state.memos.some(m => m.id === id)) throw new Error('作品メモが見つかりません。');
+  const title = details.title.trim() || '無題の作品';
+  const url = details.url.trim();
+  if (title.length > 2000 || url.length > 2000 || details.note.length > 200000) throw new Error('入力内容が長すぎます。');
+  if (url && !safeUrl(url)) throw new Error('投稿URLは http:// または https:// で入力してください。');
+  const metadata = { title, url, note: details.note };
+  return {
+    ...state,
+    memos: state.memos.map(m => m.id === id ? { ...m, ...metadata, updatedAt: now } : m),
+    draft: state.draft.memoId === id ? { ...state.draft, ...metadata } : state.draft,
+  };
+}
 export function loadMemo(state: AppState, memo: Memo, categories?: Category[]): AppState {
   if (!categories) return { ...state, draft: { fields: { ...memo.fields }, memoId: memo.id, title: memo.title, url: memo.url, note: memo.note } };
   const fields = { ...state.draft.fields }; categories.forEach(c => fields[c] = memo.fields[c]);

@@ -2,6 +2,10 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import { ArrowDownToLine, ArrowUpFromLine, BookOpen, Check, ChevronDown, ChevronRight, Copy, ExternalLink, FilePlus2, Leaf, Moon, Plus, Save, Search, Settings, SlidersHorizontal, Sparkles, Star, Sun, Trash2, X } from 'lucide-react';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import MemoCollection, { EMPTY_MEMO_FILTER } from './MemoCollection';
+import MemoDetailsEditor from './MemoDetailsEditor';
+import YamlImportPanel from './YamlImportPanel';
+import { applyPromptImport } from './yamlImport';
+import { updateMemoDetails } from './domain';
 import { CATEGORIES, ids, initialState, parseTags, outputs, toggleTag, completeTag, suggestions, searchHistory, saveMemo, deleteMemo, loadMemo, newDraft, safeUrl, normalizeTag, keyOf, type AppState, type Category, type Memo, type MemoFilter, type TagSort } from './domain';
 import { STORAGE_KEY, MAX_BACKUP_BYTES, browserStorage, loadState, persistState, exportBackup, importBackup, downloadText, copyText } from './storage';
 
@@ -14,7 +18,7 @@ function Modal({ title, children, onClose, wide = false }: { title: string; chil
   const message = useContext(ToastContext);
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => { const d = ref.current!; d.showModal(); const previous = document.body.style.overflow; document.body.style.overflow = 'hidden'; return () => { d.close(); document.body.style.overflow = previous; }; }, []);
-  return <dialog ref={ref} className={`sheet ${wide ? 'wide' : ''}`} onCancel={onClose} onClick={e => { if (e.target === ref.current) { const r = ref.current.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) onClose(); } }}>
+  return <dialog ref={ref} className={`sheet ${wide ? 'wide' : ''}`} onCancel={e => { e.preventDefault(); onClose(); }} onClick={e => { if (e.target === ref.current) { const r = ref.current.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) onClose(); } }}>
     <div className="sheet-head"><h2>{title}</h2><button className="icon-button" aria-label="閉じる" onClick={onClose}><X /></button></div><div className="sheet-body">{children}</div>{message && <div className="sheet-message" role="status">{message}</div>}
   </dialog>;
 }
@@ -85,7 +89,8 @@ export default function App() {
   const [state, setState] = useState(loaded.state); const stateRef = useRef(state);
   const [storageError, setStorageError] = useState<string | null>(loaded.error); const blocked = useRef(!!loaded.error);
   const [tab, setTab] = useState<'editor' | 'memos'>('editor');
-  const [modal, setModal] = useState<'settings' | 'history' | 'output' | 'save' | null>(null);
+  const [modal, setModal] = useState<'settings' | 'history' | 'output' | 'save' | 'yaml' | null>(null);
+  const [metadataDirty, setMetadataDirty] = useState(false);
   const [toast, setToast] = useState(''); const [detailId, setDetailId] = useState<string | null>(null);
   const [partial, setPartial] = useState<Category[] | null>(null); const [pendingImport, setPendingImport] = useState<AppState | null>(null);
   const [keyboard, setKeyboard] = useState(false); const [online, setOnline] = useState(navigator.onLine);
@@ -129,13 +134,22 @@ export default function App() {
       {needRefresh && <div className="notice"><span>新しいバージョンを利用できます。</span><button onClick={() => { if (blocked.current) { setToast('保存停止中のため更新できません。先にJSONを退避してください。'); return; } const error = persistState(browserStorage, stateRef.current); if (error) setStorageError(error); else void updateServiceWorker(true).catch(() => setToast('更新に失敗しました。オンラインで再試行してください。')); }}>入力を保存して更新</button></div>}
       <div hidden={tab !== 'editor'}>
         <div className="workspace-title"><div><div className="eyebrow">PROMPT WORKSPACE</div><h1>ひとつずつ、イメージに。</h1><p>言葉を重ねて、あなたの世界を描こう。</p></div><button className="secondary" onClick={() => { if (confirm('現在の編集内容を初期値で置き換え、新規プロンプトを作成します。未保存の作品はJSONバックアップで退避できます。続けますか？')) commit(newDraft); }}><FilePlus2 size={17} />新規作成</button></div>
+        <div className="editor-tools"><button className="text-button" onClick={() => setModal('yaml')}><ArrowUpFromLine size={15} />YAMLから一括読み込み</button></div>
         <div className="workspace-grid"><div className="editor-column"><div className="editor-status"><span><span className="status-dot" />{state.draft.memoId ? `編集中：${state.draft.title}` : '新しいプロンプト'}</span><span>{storageError ? '保存に注意' : '自動保存済み'} · {total} tags</span></div><div className="categories">{CATEGORIES.map(([id], i) => <CategoryEditor key={id} category={id} index={i} state={state} commit={commit} openHistory={() => { commit(s => ({ ...s, settings: { ...s.settings, active: id } })); setModal('history'); }} />)}</div><div className="editor-footnote"><Leaf size={14} /><span>あなたのタグと作品は、このブラウザの中だけに。</span></div></div><aside className="desktop-palette"><HistoryPanel state={state} commit={commit} /></aside></div>
       </div>
-      {tab === 'memos' && <MemoCollection memos={state.memos} filter={filter} setFilter={setFilter} onOpen={id => { setPartial(null); setDetailId(id); }} onEdit={() => setTab('editor')} />}
+      {tab === 'memos' && <MemoCollection memos={state.memos} filter={filter} setFilter={setFilter} onOpen={id => { setMetadataDirty(false); setPartial(null); setDetailId(id); }} onEdit={() => setTab('editor')} />}
     </main>
     {tab === 'editor' && <footer className={`action-bar ${keyboard ? 'keyboard-open' : ''}`}><div className="action-inner"><span className="action-summary"><span className="status-dot" />{total} tags<small>イメージを、言葉に。</small></span><button className="secondary" onClick={() => copy(result.positive)} disabled={!result.positive}><Copy size={17} /><span>コピー</span></button><button className="secondary" onClick={() => setModal('output')}><ExternalLink size={17} /><span>出力</span></button><button className="primary" onClick={() => setModal('save')}><Save size={17} /><span>保存</span></button></div></footer>}
     {toast && !modal && !detail && <div className="toast" role="status"><Check size={17} />{toast}</div>}
     {modal === 'history' && <Modal title="タグ履歴" onClose={() => setModal(null)}><HistoryPanel state={state} commit={commit} /></Modal>}
+    {modal === 'yaml' && <Modal title="YAMLから一括読み込み" wide onClose={() => setModal(null)}><YamlImportPanel fields={state.draft.fields} onImport={(values, mode) => {
+      if (blocked.current) return '自動保存が停止中です。先に設定でJSONを退避・復元してください。';
+      try {
+        const persisted = commit(s => applyPromptImport(s, values, mode));
+        if (!persisted) return '画面には反映しましたが、端末への保存に失敗しました。JSONで退避してください。';
+        setModal(null); setToast('YAMLのタグをプロンプトに読み込みました'); return null;
+      } catch (e) { return (e as Error).message; }
+    }} /></Modal>}
     {modal === 'output' && <Modal title="最終プロンプト" onClose={() => setModal(null)}><p className="muted">カテゴリ順に連結・変換した出力です。</p><OutputBlock title="ポジティブ" text={result.positive} onCopy={copy} /><OutputBlock title="ネガティブ" text={result.negative} onCopy={copy} /></Modal>}
     {modal === 'save' && <Modal title={state.draft.memoId ? '作品メモを更新' : '作品メモに保存'} onClose={() => setModal(null)}><form onSubmit={e => { e.preventDefault(); save(); }}>
       <p className="muted">今のプロンプトを記録し、使ったタグをパレットへ。</p>
@@ -152,10 +166,17 @@ export default function App() {
       <section className="settings-section"><h3>新規作成時の初期値</h3><p className="muted">各カテゴリの「この内容を初期値にする」で登録できます。</p>{CATEGORIES.map(([id, name]) => <div className="default-row" key={id}><span>{name}<small>{state.defaults[id] || '未設定'}</small></span><button className="text-button" disabled={!state.defaults[id]} onClick={() => { if (confirm(`「${name}」の初期値を解除しますか？`)) commit(s => ({ ...s, defaults: { ...s.defaults, [id]: '' } })); }}>解除</button></div>)}</section>
       <section className="settings-section"><h3>iPhoneでアプリとして使う</h3><p className="muted">Safariの共有メニュー →「ホーム画面に追加」。初回はオンラインで開き、キャッシュ完了後はオフラインでも編集できます。</p><p className="pwa-status">{offlineReady || !online ? 'オフライン機能を利用できます' : '初回アクセス時にオフライン用ファイルを準備します'}</p><p className="muted">保存先はこの端末・ブラウザ内です。Safariとホーム画面アプリで同じデータが共有されるとは限りません。定期的にJSONを「ファイル」へ保存してください。</p></section><p className="version">Anima Prompt Tool · v1.0.0</p>
     </Modal>}
-    {detail && <Modal title="作品メモ" wide onClose={() => { setDetailId(null); setPartial(null); }}><div className="memo-detail-title"><h2>{detail.title}</h2><span>作成 {dateTime(detail.createdAt)}<br />更新 {dateTime(detail.updatedAt)}</span></div><OutputBlock title="ポジティブ" text={detail.positive} onCopy={copy} /><OutputBlock title="ネガティブ" text={detail.negative} onCopy={copy} />{detail.note && <div className="note-content"><h3>自由メモ</h3><p>{detail.note}</p></div>}
-      <div className="button-row"><button className={`secondary ${detail.favorite ? 'starred' : ''}`} aria-pressed={detail.favorite} onClick={() => commit(s => ({ ...s, memos: s.memos.map(m => m.id === detail.id ? { ...m, favorite: !m.favorite } : m) }))}><Star size={16} fill={detail.favorite ? 'currentColor' : 'none'} />{detail.favorite ? 'お気に入り解除' : 'お気に入り登録'}</button>{safeUrl(detail.url) ? <a className="secondary" href={safeUrl(detail.url)!} target="_blank" rel="noopener noreferrer"><ExternalLink size={16} />投稿を開く</a> : <button className="secondary" disabled><ExternalLink size={16} />投稿URLなし</button>}<button className="secondary" onClick={() => edit(detail)}>全体を読み込んで編集</button><button className="secondary" onClick={() => setPartial(partial === null ? [] : null)}>カテゴリを選んで読み込む</button></div>
-      {partial !== null && <div className="partial-load"><p>チェックしたカテゴリだけを置き換えます。タイトル・投稿URL・自由メモは変更しません。</p><div className="category-checks">{CATEGORIES.map(([id, name]) => <label className="check-label" key={id}><input type="checkbox" checked={partial.includes(id)} onChange={e => setPartial(e.target.checked ? [...partial, id] : partial.filter(c => c !== id))} />{name}</label>)}</div><button className="primary" disabled={!partial.length} onClick={() => { if (confirm(`選択した${partial.length}カテゴリの現在の内容を置き換えます。よろしいですか？`)) { commit(s => loadMemo(s, detail, partial)); setDetailId(null); setPartial(null); setTab('editor'); setToast('選択したカテゴリを読み込みました'); } }}>選択カテゴリを置き換える</button></div>}
-      <div className="detail-bottom"><button className="secondary" onClick={() => { if (confirm('この保存済みメモを複製して新規保存します。現在のエディター内容は維持されます。よろしいですか？')) { commit(s => { const duplicate = saveMemo(loadMemo(s, detail), true); return { ...duplicate, draft: s.draft }; }); setToast('新しいIDで作品を複製しました'); } }}><Copy size={15} />複製して新規保存</button><button className="danger-button" onClick={() => { if (confirm(`「${detail.title}」を削除します。この操作は取り消せません。`)) { commit(s => deleteMemo(s, detail.id)); setDetailId(null); setToast('作品メモを削除しました'); } }}><Trash2 size={15} />削除</button></div>
+    {detail && <Modal title="作品メモ" wide onClose={() => { if (!metadataDirty || confirm('作品情報の未保存の変更を破棄して閉じますか？')) { setMetadataDirty(false); setDetailId(null); setPartial(null); } }}><div className="memo-detail-title"><h2>{detail.title}</h2><span>作成 {dateTime(detail.createdAt)}<br />更新 {dateTime(detail.updatedAt)}</span></div><MemoDetailsEditor key={detail.id} memo={detail} onDirtyChange={setMetadataDirty} onSave={values => {
+      if (blocked.current) return '自動保存が停止中です。先に設定でJSONを退避・復元してください。';
+      try {
+        const persisted = commit(s => updateMemoDetails(s, detail.id, values));
+        if (!persisted) return '端末への保存に失敗しました。JSONで退避してください。';
+        setToast('作品情報を保存しました'); return null;
+      } catch (e) { return (e as Error).message; }
+    }} /><OutputBlock title="ポジティブ" text={detail.positive} onCopy={copy} /><OutputBlock title="ネガティブ" text={detail.negative} onCopy={copy} />{detail.note && <div className="note-content"><h3>自由メモ</h3><p>{detail.note}</p></div>}
+      <div className="button-row"><button className={`secondary ${detail.favorite ? 'starred' : ''}`} aria-pressed={detail.favorite} onClick={() => commit(s => ({ ...s, memos: s.memos.map(m => m.id === detail.id ? { ...m, favorite: !m.favorite } : m) }))}><Star size={16} fill={detail.favorite ? 'currentColor' : 'none'} />{detail.favorite ? 'お気に入り解除' : 'お気に入り登録'}</button>{safeUrl(detail.url) ? <a className="secondary" href={safeUrl(detail.url)!} target="_blank" rel="noopener noreferrer"><ExternalLink size={16} />投稿を開く</a> : <button className="secondary" disabled><ExternalLink size={16} />投稿URLなし</button>}<button className="secondary" disabled={metadataDirty} onClick={() => edit(detail)}>全体を読み込んで編集</button><button className="secondary" onClick={() => setPartial(partial === null ? [] : null)}>カテゴリを選んで読み込む</button></div>
+      {partial !== null && <div className="partial-load"><p>チェックしたカテゴリだけを置き換えます。タイトル・投稿URL・自由メモは変更しません。</p><div className="category-checks">{CATEGORIES.map(([id, name]) => <label className="check-label" key={id}><input type="checkbox" checked={partial.includes(id)} onChange={e => setPartial(e.target.checked ? [...partial, id] : partial.filter(c => c !== id))} />{name}</label>)}</div><button className="primary" disabled={!partial.length || metadataDirty} onClick={() => { if (confirm(`選択した${partial.length}カテゴリの現在の内容を置き換えます。よろしいですか？`)) { commit(s => loadMemo(s, detail, partial)); setDetailId(null); setPartial(null); setTab('editor'); setToast('選択したカテゴリを読み込みました'); } }}>選択カテゴリを置き換える</button></div>}
+      <div className="detail-bottom"><button className="secondary" disabled={metadataDirty} onClick={() => { if (confirm('この保存済みメモを複製して新規保存します。現在のエディター内容は維持されます。よろしいですか？')) { commit(s => { const duplicate = saveMemo(loadMemo(s, detail), true); return { ...duplicate, draft: s.draft }; }); setToast('新しいIDで作品を複製しました'); } }}><Copy size={15} />複製して新規保存</button><button className="danger-button" disabled={metadataDirty} onClick={() => { if (confirm(`「${detail.title}」を削除します。この操作は取り消せません。`)) { commit(s => deleteMemo(s, detail.id)); setDetailId(null); setToast('作品メモを削除しました'); } }}><Trash2 size={15} />削除</button></div>
     </Modal>}
   </ToastContext.Provider>;
 }

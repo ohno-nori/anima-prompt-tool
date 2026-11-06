@@ -8,6 +8,31 @@
 .sheet-message{position:sticky;bottom:0;padding:14px 20px;padding-bottom:calc(14px + env(safe-area-inset-bottom));background:var(--ink);color:var(--surface);font-size:12px;line-height:1.7;z-index:3}textarea,input{scroll-margin-block:90px 120px}.chip{white-space:normal;word-break:break-word}.history-tag>span{word-break:break-word}
 
 /* Memo collection: compact filters and a single column of saved works. */
+.editor-tools { display: flex; justify-content: flex-end; margin: -20px 0 10px; }
+.editor-tools .text-button { padding-inline: 8px; }
+.memo-edit-details { margin-top: 10px; font-size: 12px; }
+.memo-details-editor { margin: 16px 0 24px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
+.memo-details-editor .button-row { justify-content: flex-end; }
+.yaml-file-button { margin-top: 18px; }
+.yaml-source { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 16px; tab-size: 2; }
+.yaml-filename { overflow-wrap: anywhere; font-size: 12px; color: var(--muted); margin-top: 8px; }
+.yaml-help { font-size: 12px; margin-bottom: 18px; }
+.yaml-help summary { cursor: pointer; padding-block: 12px; color: var(--accent); }
+.yaml-help pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; background: var(--bg); border-radius: 8px; line-height: 1.7; }
+.yaml-id-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; line-height: 1.7; }
+.yaml-id-list code { overflow-wrap: anywhere; }
+.yaml-preview { margin-top: 24px; border-top: 1px solid var(--line); padding-top: 20px; }
+.yaml-modes { display: flex; flex-direction: column; border: 0; padding: 0; margin: 16px 0 8px; }
+.yaml-modes legend { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.yaml-preview-list { margin: 16px 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.yaml-preview-row { padding: 12px 14px; }
+.yaml-preview-row + .yaml-preview-row { border-top: 1px solid var(--line); }
+.yaml-preview-row h4 { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; font-size: 12px; margin: 0 0 7px; }
+.yaml-preview-row small { color: var(--muted); font-size: 10px; font-weight: 400; }
+.yaml-preview-row p { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.7; }
+.yaml-preview > .primary { margin-top: 16px; width: 100%; }
+.yaml-error { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
+@media(max-width:680px) { .yaml-id-list { grid-template-columns: 1fr; } .editor-tools { margin-top: -18px; } .memo-details-editor { padding: 14px; } }
 .memos-view { max-width: 760px; margin: 28px auto 0; }
 .memo-list-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
 .memo-list-heading h1 { font-size: 19px; font-weight: 600; letter-spacing: 0; }

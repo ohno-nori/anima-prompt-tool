@@ -196,3 +196,58 @@ test('作品一覧の条件クリア・お気に入りと日付絞り込み', as
   await page.getByRole('button', { name: '閉じる', exact: true }).click();
   await page.screenshot({ path: `test-results/${testInfo.project.name}-memos-dark.png`, fullPage: true, scale: 'css' });
 });
+
+test('作品情報を直接編集してもプロンプトと履歴は変わらない', async ({ page }, testInfo) => {
+  await page.getByLabel('外見のタグ', { exact: true }).fill('blue_eyes');
+  await save(page, '編集前');
+  const before = await data(page);
+  await page.getByLabel('外見のタグ', { exact: true }).fill('unsaved prompt');
+  await page.getByRole('button', { name: /作品メモ/ }).click();
+  await page.getByRole('button', { name: '編集前 作品を開く' }).click();
+  await page.getByRole('button', { name: 'タイトル・URL・コメントを編集' }).click();
+  await page.getByLabel('タイトル', { exact: true }).fill('編集後');
+  await page.getByLabel('投稿URL', { exact: true }).fill('https://example.com/my_art');
+  await page.getByLabel('コメント（自由メモ）', { exact: true }).fill('my_note\n生成設定の追記');
+  await page.screenshot({ path: `test-results/${testInfo.project.name}-memo-direct-edit.png`, scale: 'css' });
+  await page.getByRole('button', { name: '作品情報を保存' }).click();
+  await expect(page.getByRole('heading', { name: '編集後', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: '投稿を開く' })).toHaveAttribute('href', 'https://example.com/my_art');
+  const after = await data(page);
+  expect(after.history).toEqual(before.history); expect(after.memos[0].positive).toBe(before.memos[0].positive);
+  expect(after.memos[0].createdAt).toBe(before.memos[0].createdAt); expect(after.memos[0].updatedAt).not.toBe(before.memos[0].updatedAt);
+  expect(after.draft.fields.appearance).toBe('unsaved prompt'); expect(after.draft.title).toBe('編集後');
+  await page.getByRole('button', { name: '閉じる', exact: true }).click();
+  await page.getByLabel('作品メモを検索').fill('生成設定の追記');
+  await expect(page.getByRole('button', { name: '編集後 作品を開く' })).toBeVisible();
+  await page.reload();
+  expect((await data(page)).memos[0].note).toBe('my_note\n生成設定の追記');
+});
+
+test('YAML貼り付けとファイル読み込み・追加と部分置換', async ({ page }, testInfo) => {
+  await page.getByLabel('外見のタグ', { exact: true }).fill('blue eyes');
+  await page.getByRole('button', { name: 'YAMLから一括読み込み' }).click();
+  await page.getByLabel('YAMLを貼り付け', { exact: true }).fill('appearance: "blue_eyes, long_hair"\nartist: "artist_name"\nquality: "score_9_up"');
+  await page.getByRole('button', { name: '読み込み内容を確認' }).click();
+  expect((await data(page)).draft.fields.appearance).toBe('blue eyes');
+  await expect(page.getByRole('region', { name: 'YAML読み込みプレビュー' })).toBeVisible();
+  await page.screenshot({ path: `test-results/${testInfo.project.name}-yaml-import.png`, scale: 'css' });
+  await page.getByRole('button', { name: 'プロンプトに追加する' }).click();
+  let current = await data(page);
+  expect(current.draft.fields.appearance).toBe('blue eyes, long hair'); expect(current.draft.fields.artist).toBe('@artist name'); expect(current.history).toEqual([]);
+  await page.getByRole('button', { name: 'YAMLから一括読み込み' }).click();
+  await page.getByLabel('YAMLファイルを選択', { exact: true }).setInputFiles({ name: 'prompt.yaml', mimeType: 'text/yaml', buffer: Buffer.from('appearance: "green_eyes"\nartist: ""') });
+  await expect(page.getByLabel('YAMLを貼り付け', { exact: true })).toHaveValue('appearance: "green_eyes"\nartist: ""');
+  await page.getByRole('button', { name: '読み込み内容を確認' }).click();
+  await page.getByRole('radio', { name: 'YAMLにあるカテゴリを置き換え' }).check();
+  await page.getByRole('button', { name: '対象カテゴリを置き換える' }).click();
+  current = await data(page);
+  expect(current.draft.fields.appearance).toBe('green eyes'); expect(current.draft.fields.artist).toBe(''); expect(current.draft.fields.quality).toBe('score_9_up'); expect(current.history).toEqual([]);
+  await page.getByRole('button', { name: 'YAMLから一括読み込み' }).click();
+  await page.getByLabel('YAMLを貼り付け', { exact: true }).fill('unknown: "bad"');
+  await page.getByRole('button', { name: '読み込み内容を確認' }).click();
+  await expect(page.getByRole('alert')).toContainText('不明なカテゴリID');
+  await expect(page.getByRole('button', { name: 'プロンプトに追加する' })).toHaveCount(0);
+  expect(await data(page)).toEqual(current);
+  await page.getByRole('button', { name: '閉じる', exact: true }).click();
+  await page.reload(); await expect(page.getByLabel('外見のタグ', { exact: true })).toHaveValue('green eyes');
+});
