@@ -43,7 +43,8 @@ test('カテゴリ編集・コピー・保存・再読込・補完・タグ連�
   const current = await data(page); expect(current.memos).toHaveLength(1); expect(current.history.find((h: { tag: string }) => h.tag === 'very long hair').workIds).toHaveLength(1);
   expect(errors).toEqual([]);
 });
-test('作品検索・詳細・複製・部分読込・投稿URL', async ({ page }) => {
+test('作品検索・詳細・複製・部分読込・投稿URL', async ({ page, context }) => {
+  await context.route('https://example.com/a_b', route => route.fulfill({ status: 200, contentType: 'text/html', body: '<title>Saved artwork</title>' }));
   await page.getByLabel('外見のタグ', { exact: true }).fill('jitome');
   await page.getByRole('button', { name: '保存', exact: true }).click();
   await page.getByLabel('タイトル', { exact: true }).fill('テスト作品');
@@ -53,7 +54,17 @@ test('作品検索・詳細・複製・部分読込・投稿URL', async ({ page 
   await page.getByRole('button', { name: /作品メモ/ }).click();
   await page.getByLabel('作品メモを検索').fill('自然光');
   await page.getByRole('button', { name: /テスト作品.*作品を開く/ }).click();
-  await expect(page.getByRole('link', { name: '投稿を開く' })).toHaveAttribute('href', 'https://example.com/a_b');
+  await expect(page.getByRole('link', { name: /保存したリンクを開く/ })).toHaveAttribute('href', 'https://example.com/a_b');
+  const savedLink = page.getByRole('link', { name: /保存したリンクを開く/ });
+  await expect(savedLink).toHaveAttribute('target', '_blank');
+  await expect(savedLink).toHaveAttribute('rel', 'noopener noreferrer');
+  await expect(page.locator('.memo-link-domain')).toHaveText('example.com');
+  const popupPromise = page.waitForEvent('popup');
+  await savedLink.click();
+  const popup = await popupPromise;
+  await expect(popup).toHaveURL('https://example.com/a_b');
+  await popup.close();
+  await expect(page.getByRole('dialog')).toBeVisible();
   await page.getByRole('button', { name: '複製して新規保存', exact: true }).click();
   expect((await data(page)).memos).toHaveLength(2);
   await page.getByRole('button', { name: 'カテゴリを選んで読み込む', exact: true }).click();
@@ -204,6 +215,8 @@ test('作品情報を直接編集してもプロンプトと履歴は変わら�
   await page.getByLabel('外見のタグ', { exact: true }).fill('unsaved prompt');
   await page.getByRole('button', { name: /作品メモ/ }).click();
   await page.getByRole('button', { name: '編集前 作品を開く' }).click();
+  await expect(page.getByRole('link', { name: /保存したリンクを開く/ })).toHaveCount(0);
+  await expect(page.locator('.memo-link-domain')).toHaveCount(0);
   await page.getByRole('button', { name: 'タイトル・URL・コメントを編集' }).click();
   await page.getByLabel('タイトル', { exact: true }).fill('編集後');
   await page.getByLabel('投稿URL', { exact: true }).fill('https://example.com/my_art');
@@ -211,7 +224,9 @@ test('作品情報を直接編集してもプロンプトと履歴は変わら�
   await page.screenshot({ path: `test-results/${testInfo.project.name}-memo-direct-edit.png`, scale: 'css' });
   await page.getByRole('button', { name: '作品情報を保存' }).click();
   await expect(page.getByRole('heading', { name: '編集後', exact: true })).toBeVisible();
-  await expect(page.getByRole('link', { name: '投稿を開く' })).toHaveAttribute('href', 'https://example.com/my_art');
+  await expect(page.getByRole('link', { name: /保存したリンクを開く/ })).toHaveAttribute('href', 'https://example.com/my_art');
+  await expect(page.locator('.memo-link-domain')).toHaveText('example.com');
+  await page.screenshot({ path: `test-results/${testInfo.project.name}-memo-saved-link.png`, scale: 'css' });
   const after = await data(page);
   expect(after.history).toEqual(before.history); expect(after.memos[0].positive).toBe(before.memos[0].positive);
   expect(after.memos[0].createdAt).toBe(before.memos[0].createdAt); expect(after.memos[0].updatedAt).not.toBe(before.memos[0].updatedAt);
