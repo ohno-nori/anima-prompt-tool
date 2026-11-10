@@ -34,7 +34,7 @@ const stateSchema = z.object({
   draft: z.object({ fields: fieldsSchema, memoId: identity.nullable(), title: short, url: short, note: text }).strict(),
   memos: z.array(memoSchema).max(50000), history: z.array(historySchema).max(100000),
   defaults: fieldsSchema,
-  settings: z.object({ theme: z.enum(['system', 'light', 'dark']), open: z.array(categorySchema).max(12), active: categorySchema }).strict(),
+  settings: z.object({ theme: z.enum(['system', 'light', 'dark']), open: z.array(categorySchema).max(12), active: categorySchema, lastBackupAt: timestamp.nullable().optional() }).strict(),
 }).strict();
 export type AppState = z.infer<typeof stateSchema>;
 export type Memo = z.infer<typeof memoSchema>;
@@ -81,6 +81,16 @@ export function outputs(fields: Fields) {
 export function toggleTag(value: string, tag: string, category: Category): string {
   const tags = parseTags(value, category); const normalized = normalizeTag(tag, category);
   return (tags.some(t => keyOf(t) === keyOf(normalized)) ? tags.filter(t => keyOf(t) !== keyOf(normalized)) : [...tags, normalized]).join(', ');
+}
+// Reorder the same normalized, deduplicated sequence used by chips and outputs.
+export function moveTag(value: string, category: Category, index: number, direction: -1 | 1): string {
+  const tags = parseTags(value, category); const target = index + direction;
+  if (!Number.isInteger(index) || index < 0 || index >= tags.length || target < 0 || target >= tags.length) return value;
+  [tags[index], tags[target]] = [tags[target], tags[index]];
+  const next = tags.join(', ');
+  const parsed = parseTags(next, category);
+  if (parsed.length !== tags.length || parsed.some((tag, i) => tag !== tags[i])) throw new Error('括弧や引用符が閉じていないタグがあります。入力欄で修正してから並び替えてください。');
+  return next;
 }
 export function tokenAt(value: string, cursor: number) { return segments(value).find(s => cursor >= s.start && cursor <= s.end) ?? segments(value).at(-1)!; }
 export function completeTag(value: string, cursor: number, tag: string, category: Category) {
@@ -147,13 +157,13 @@ export function loadMemo(state: AppState, memo: Memo, categories?: Category[]): 
   return { ...state, draft: { ...state.draft, fields } };
 }
 export function newDraft(state: AppState): AppState { return { ...state, draft: { fields: { ...state.defaults }, memoId: null, title: '', url: '', note: '' } }; }
-export type MemoFilter = { query: string; field: 'all' | 'title' | 'note' | 'prompt'; start: string; end: string; favorite: boolean; oldest: boolean };
+export type MemoFilter = { query: string; field: 'all' | 'title' | 'note' | 'prompt'; start: string; end: string; favorite: boolean; withoutUrl?: boolean; oldest: boolean };
 export function localDate(iso: string) { const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
 export function searchMemos(memos: Memo[], filter: MemoFilter): Memo[] {
   return memos.filter(m => {
     const content = filter.field === 'title' ? m.title : filter.field === 'note' ? m.note : filter.field === 'prompt' ? `${m.positive} ${m.negative}` : `${m.title} ${m.note} ${m.positive} ${m.negative}`;
     const day = localDate(m.createdAt);
-    return (!filter.favorite || m.favorite) && (!filter.start || day >= filter.start) && (!filter.end || day <= filter.end) && keyOf(content).includes(keyOf(filter.query));
+    return (!filter.withoutUrl || !safeUrl(m.url)) && (!filter.favorite || m.favorite) && (!filter.start || day >= filter.start) && (!filter.end || day <= filter.end) && keyOf(content).includes(keyOf(filter.query));
   }).sort((a, b) => filter.oldest ? a.createdAt.localeCompare(b.createdAt) : b.createdAt.localeCompare(a.createdAt));
 }
 export function validateState(input: unknown): AppState {

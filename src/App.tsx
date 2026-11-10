@@ -1,15 +1,16 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { ArrowDownToLine, ArrowUpFromLine, BookOpen, Check, ChevronDown, ChevronRight, Copy, ExternalLink, FilePlus2, Leaf, Moon, Plus, Save, Search, Settings, SlidersHorizontal, Sparkles, Star, Sun, Trash2, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpFromLine, BookOpen, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, Copy, ExternalLink, FilePlus2, Leaf, Moon, Plus, Save, Search, Settings, SlidersHorizontal, Sparkles, Star, Sun, Trash2, X } from 'lucide-react';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import MemoCollection, { EMPTY_MEMO_FILTER } from './MemoCollection';
 import MemoDetailsEditor from './MemoDetailsEditor';
 import YamlImportPanel from './YamlImportPanel';
 import { applyPromptImport } from './yamlImport';
 import { updateMemoDetails } from './domain';
-import { CATEGORIES, ids, initialState, parseTags, outputs, toggleTag, completeTag, suggestions, searchHistory, saveMemo, deleteMemo, loadMemo, newDraft, safeUrl, normalizeTag, keyOf, type AppState, type Category, type Memo, type MemoFilter, type TagSort } from './domain';
+import { CATEGORIES, ids, initialState, parseTags, outputs, moveTag, toggleTag, completeTag, suggestions, searchHistory, saveMemo, deleteMemo, loadMemo, newDraft, safeUrl, normalizeTag, keyOf, type AppState, type Category, type Memo, type MemoFilter, type TagSort } from './domain';
 import { STORAGE_KEY, MAX_BACKUP_BYTES, browserStorage, loadState, persistState, exportBackup, importBackup, downloadText, copyText } from './storage';
 
 const label = (id: Category) => CATEGORIES.find(c => c[0] === id)![1];
+const APP_VERSION = '1.2.0';
 const dateTime = (value: string) => new Date(value).toLocaleString('ja-JP', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 type Commit = (updater: (s: AppState) => AppState) => boolean;
 const ToastContext = createContext('');
@@ -24,12 +25,17 @@ function Modal({ title, children, onClose, wide = false }: { title: string; chil
 }
 
 function CategoryEditor({ category, index, state, commit, openHistory }: { category: Category; index: number; state: AppState; commit: Commit; openHistory: () => void }) {
+  const [reordering, setReordering] = useState(false); const [moveMessage, setMoveMessage] = useState('');
   const [cursor, setCursor] = useState(0); const [focused, setFocused] = useState(false); const [composing, setComposing] = useState(false); const [highlight, setHighlight] = useState(0);
   const ref = useRef<HTMLTextAreaElement>(null);
   const value = state.draft.fields[category]; const open = state.settings.open.includes(category);
   const tags = parseTags(value, category); const frequent = searchHistory(state.history, category).slice(0, 7);
   const candidates = focused && !composing ? suggestions(state.history, category, value, cursor) : [];
   const setValue = (text: string) => commit(s => ({ ...s, draft: { ...s.draft, fields: { ...s.draft.fields, [category]: text } } }));
+  function move(position: number, direction: -1 | 1) {
+    try { setValue(moveTag(value, category, position, direction)); setMoveMessage(`${tags[position]} を${position + direction + 1}番目へ移動しました`); }
+    catch (error) { setMoveMessage((error as Error).message); }
+  }
   function accept(tag: string) {
     const next = completeTag(value, cursor, tag, category); setValue(next.text); setCursor(next.cursor); setFocused(false);
     requestAnimationFrame(() => { ref.current?.focus(); ref.current?.setSelectionRange(next.cursor, next.cursor); });
@@ -50,7 +56,16 @@ function CategoryEditor({ category, index, state, commit, openHistory }: { categ
         onKeyDown={e => { if (composing || e.nativeEvent.isComposing || !candidates.length) return; if (e.key === 'ArrowDown') { e.preventDefault(); setHighlight((highlight + 1) % candidates.length); } if (e.key === 'ArrowUp') { e.preventDefault(); setHighlight((highlight + candidates.length - 1) % candidates.length); } if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); accept(candidates[Math.min(highlight, candidates.length - 1)].tag); } if (e.key === 'Escape') setFocused(false); }} />
       {!!candidates.length && <div id={`suggest-${category}`} className="suggestions" role="listbox" aria-label="入力補完候補">{candidates.map((t, i) => <button key={t.id} id={`candidate-${category}-${i}`} role="option" aria-selected={i === highlight} className={i === highlight ? 'highlight' : ''} onPointerDown={e => e.preventDefault()} onClick={() => accept(t.tag)}><span>{t.tag}</span><small>{label(t.category)}{t.favorite ? ' ★' : ''}</small></button>)}</div>}
       <p className="input-hint" id={`hint-${category}`}>カンマ・改行で区切り。変換は出力に反映されます。</p>
-      {!!tags.length && <div className="chips current-tags">{tags.map(t => <button key={t} className="chip selected" aria-label={`${t} を削除`} onClick={() => setValue(toggleTag(value, t, category))}>{t}<X size={12} /></button>)}</div>}
+      {(tags.length > 1 || reordering) && <button className="text-button" aria-pressed={reordering} aria-controls={`tag-order-${category}`} onClick={() => setReordering(!reordering)}>{reordering ? '並び替えを完了' : 'タグを並び替える'}</button>}
+      <p className="muted" role="status">{moveMessage}</p>
+      {reordering && tags.length > 0 ? <div id={`tag-order-${category}`} className="tag-order" role="group" aria-label={`${label(category)}のタグ順`}>
+        <p className="muted">矢印をタップして前後に移動できます。</p>
+        {tags.map((tag, position) => <div className="tag-order-row" key={tag}>
+          <button className="icon-button secondary" aria-label={`${tag} を前へ移動`} disabled={position === 0} onClick={() => move(position, -1)}><ArrowLeft size={18} /></button>
+          <span><small>{position + 1}</small>{tag}</span>
+          <button className="icon-button secondary" aria-label={`${tag} を後へ移動`} disabled={position === tags.length - 1} onClick={() => move(position, 1)}><ArrowRight size={18} /></button>
+        </div>)}
+      </div> : !!tags.length && <div className="chips current-tags">{tags.map(t => <button key={t} className="chip selected" aria-label={`${t} を削除`} onClick={() => setValue(toggleTag(value, t, category))}>{t}<X size={12} /></button>)}</div>}
       <div className="palette-label"><span>よく使うタグ</span><button className="text-button" onClick={openHistory}>すべて表示 <ChevronRight size={14} /></button></div>
       {frequent.length ? <div className="chips">{frequent.map(t => <button key={t.id} className={`chip ${selected(t.tag) ? 'selected' : ''}`} aria-pressed={selected(t.tag)} onClick={() => setValue(toggleTag(value, t.tag, category))}>{selected(t.tag) ? <Check size={13} /> : <Plus size={13} />}{t.tag}</button>)}</div> : <p className="empty-inline">作品メモを保存すると、ここにタグが育ちます。</p>}
       <button className="text-button default-action" onClick={() => { if (confirm(`「${label(category)}」の現在の内容を、新規プロンプトの初期値に登録します。よろしいですか？`)) commit(s => ({ ...s, defaults: { ...s.defaults, [category]: value } })); }}><SlidersHorizontal size={13} />この内容を初期値にする</button>
@@ -126,7 +141,15 @@ export default function App() {
     if (!file) return;
     try { if (file.size > MAX_BACKUP_BYTES) throw new Error('ファイルサイズが20MBを超えています。'); setPendingImport(importBackup(await file.text())); } catch (e) { setToast((e as Error).message); }
   }
-  function backup() { downloadText(exportBackup(stateRef.current), `anima-backup-${new Date().toISOString().slice(0, 10)}.json`); setToast('JSONバックアップをダウンロードしました'); }
+  function backup() {
+    const now = new Date().toISOString();
+    const next = { ...stateRef.current, settings: { ...stateRef.current.settings, lastBackupAt: now } };
+    try {
+      downloadText(exportBackup(next), `anima-backup-${now.slice(0, 10)}.json`);
+      const recorded = commit(s => ({ ...s, settings: { ...s.settings, lastBackupAt: now } }));
+      setToast(recorded ? 'JSONバックアップの書き出しを実行しました' : '書き出しを実行しましたが、日時を端末に保存できませんでした');
+    } catch { setToast('JSONバックアップを書き出せませんでした。もう一度お試しください。'); }
+  }
   return <ToastContext.Provider value={toast}>
     <header className="app-header"><div className="header-inner"><a className="brand" href="#" onClick={e => { e.preventDefault(); setTab('editor'); }}><img src={`${import.meta.env.BASE_URL}favicon.svg`} alt="" /><span>Anima <span className="brand-light">Prompt Tool</span><small>YOUR WORDS, YOUR WORLD.</small></span></a><div className="header-actions"><span className="local-badge"><i />{online ? 'ローカルに保存' : 'オフライン'}</span><button className="icon-button" aria-label="設定・バックアップ" onClick={() => setModal('settings')}><Settings size={20} /></button></div></div></header>
     <main className="app-main">
@@ -161,11 +184,11 @@ export default function App() {
     </form></Modal>}
     {modal === 'settings' && <Modal title="設定・バックアップ" onClose={() => setModal(null)}>
       <section className="settings-section"><h3>表示テーマ</h3><div className="theme-options">{([['system', '端末に合わせる', Settings], ['light', 'ライト', Sun], ['dark', 'ダーク', Moon]] as const).map(([theme, name, Icon]) => <button className={state.settings.theme === theme ? 'selected' : ''} key={theme} aria-pressed={state.settings.theme === theme} onClick={() => commit(s => ({ ...s, settings: { ...s.settings, theme } }))}><Icon size={18} />{name}</button>)}</div></section>
-      <section className="settings-section"><h3>JSONバックアップ</h3><p className="muted">作品・タグ履歴・編集中の内容・設定をまとめて保存。端末の移行にも使えます。</p><div className="button-row"><button className="primary" onClick={backup}><ArrowDownToLine size={17} />JSONを書き出す</button><label className="secondary file-button"><ArrowUpFromLine size={17} />JSONを読み込む<input type="file" accept=".json,application/json" onChange={e => { void importFile(e.target.files?.[0]); e.target.value = ''; }} /></label></div>
+      <section className="settings-section"><h3>JSONバックアップ</h3><p className="backup-status muted" aria-live="polite">最終書き出し：{state.settings.lastBackupAt ? <time dateTime={state.settings.lastBackupAt}>{dateTime(state.settings.lastBackupAt)}</time> : '未実施'}</p><p className="muted">作品・タグ履歴・編集中の内容・設定をまとめて保存。端末の移行にも使えます。</p><div className="button-row"><button className="primary" onClick={backup}><ArrowDownToLine size={17} />JSONを書き出す</button><label className="secondary file-button"><ArrowUpFromLine size={17} />JSONを読み込む<input type="file" accept=".json,application/json" onChange={e => { void importFile(e.target.files?.[0]); e.target.value = ''; }} /></label></div>
       {blocked.current && <button className="secondary" onClick={() => { try { downloadText(localStorage.getItem(STORAGE_KEY) ?? '', 'anima-original-storage.json'); } catch { setToast('元データを読み取れませんでした。'); } }}>保存領域の元データを退避</button>}
       {pendingImport && <div className="import-confirm"><h3>バックアップで全データを置き換えます</h3><p>作品 {pendingImport.memos.length} 件 / 履歴 {pendingImport.history.length} 件。現在の作品・編集中の内容・初期値・設定は置き換わります。</p><p>必要な場合は先に「JSONを書き出す」で現在のデータを保存してください。</p><div className="button-row"><button className="secondary" onClick={() => setPendingImport(null)}>キャンセル</button><button className="primary" onClick={() => { const error = persistState(browserStorage, pendingImport); if (error) { setStorageError(error); return; } blocked.current = false; stateRef.current = pendingImport; setState(pendingImport); setStorageError(null); setPendingImport(null); setToast('バックアップを復元しました'); }}>すべて置き換えて復元</button></div></div>}</section>
       <section className="settings-section"><h3>新規作成時の初期値</h3><p className="muted">各カテゴリの「この内容を初期値にする」で登録できます。</p>{CATEGORIES.map(([id, name]) => <div className="default-row" key={id}><span>{name}<small>{state.defaults[id] || '未設定'}</small></span><button className="text-button" disabled={!state.defaults[id]} onClick={() => { if (confirm(`「${name}」の初期値を解除しますか？`)) commit(s => ({ ...s, defaults: { ...s.defaults, [id]: '' } })); }}>解除</button></div>)}</section>
-      <section className="settings-section"><h3>iPhoneでアプリとして使う</h3><p className="muted">Safariの共有メニュー →「ホーム画面に追加」。初回はオンラインで開き、キャッシュ完了後はオフラインでも編集できます。</p><p className="pwa-status">{offlineReady || !online ? 'オフライン機能を利用できます' : '初回アクセス時にオフライン用ファイルを準備します'}</p><p className="muted">保存先はこの端末・ブラウザ内です。Safariとホーム画面アプリで同じデータが共有されるとは限りません。定期的にJSONを「ファイル」へ保存してください。</p></section><p className="version">Anima Prompt Tool · v1.0.0</p>
+      <section className="settings-section"><h3>iPhoneでアプリとして使う</h3><p className="muted">Safariの共有メニュー →「ホーム画面に追加」。初回はオンラインで開き、キャッシュ完了後はオフラインでも編集できます。</p><p className="pwa-status">{offlineReady || !online ? 'オフライン機能を利用できます' : '初回アクセス時にオフライン用ファイルを準備します'}</p><p className="muted">保存先はこの端末・ブラウザ内です。Safariとホーム画面アプリで同じデータが共有されるとは限りません。定期的にJSONを「ファイル」へ保存してください。</p></section><p className="version">Anima Prompt Tool · v{APP_VERSION}</p>
     </Modal>}
     {detail && <Modal title="作品メモ" wide onClose={() => { if (!metadataDirty || confirm('作品情報の未保存の変更を破棄して閉じますか？')) { setMetadataDirty(false); setDetailId(null); setPartial(null); } }}><div className="memo-detail-title"><h2>{detail.title}</h2><span>作成 {dateTime(detail.createdAt)}<br />更新 {dateTime(detail.updatedAt)}</span></div>{detailUrl && <div className="memo-saved-link"><a className="primary" href={detailUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={17} aria-hidden="true" />保存したリンクを開く<span className="sr-only">（別タブで開きます）</span></a><span className="memo-link-domain" title={new URL(detailUrl).hostname}>{new URL(detailUrl).hostname}</span></div>}<MemoDetailsEditor key={detail.id} memo={detail} onDirtyChange={setMetadataDirty} onSave={values => {
       if (blocked.current) return '自動保存が停止中です。先に設定でJSONを退避・復元してください。';
