@@ -1,21 +1,45 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { initialState, saveMemo } from '../src/domain';
 const key = 'anima-prompt-tool:v1';
 test.use({ hasTouch: true });
 
-test('タグをタップで前後移動し、出力・保存・再読込が追従する', async ({ page }, info) => {
+async function dragTag(page: Page, from: string, to: string, touch: boolean, cancel = false, screenshot?: string) {
+  const chip = page.locator('#body-appearance .sortable-tags').getByRole('button', { name: from + ' を削除', exact: true });
+  const target = page.locator('#body-appearance .sortable-tags').getByRole('button', { name: to + ' を削除', exact: true });
+  await chip.evaluate(el => el.scrollIntoView({ block: 'center' }));
+  await page.waitForTimeout(250);
+  const a = (await chip.boundingBox())!; const b = (await target.boundingBox())!;
+  const first = { x: a.x + a.width / 2, y: a.y + a.height / 2 }; const last = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  if (touch) {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [first] });
+    await expect(page.locator('.tag-drag-overlay')).toBeVisible();
+    for (let step = 1; step <= 10; step++) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: first.x + (last.x-first.x)*step/10, y: first.y + (last.y-first.y)*step/10 }] });
+    }
+    if (screenshot) await page.screenshot({ path: screenshot, scale: 'css' });
+    await cdp.send('Input.dispatchTouchEvent', { type: cancel ? 'touchCancel' : 'touchEnd', touchPoints: [] });
+    await cdp.detach();
+  } else {
+    await page.mouse.move(first.x, first.y); await page.mouse.down();
+    await page.mouse.move(last.x, last.y, { steps: 15 });
+    await expect(page.locator('.tag-drag-overlay')).toBeVisible();
+    if (screenshot) await page.screenshot({ path: screenshot, scale: 'css' });
+    if (cancel) await page.keyboard.press('Escape');
+    await page.mouse.up();
+  }
+  await expect(page.locator('.tag-drag-overlay')).toHaveCount(0);
+}
+
+test('タグチップを直接ドラッグし、出力・保存・再読込が追従する', async ({ page }, info) => {
   await page.goto('./');
   const input = page.getByLabel('外見のタグ', { exact: true });
   await input.fill('blue_eyes, long_hair, BLUE EYES, braid');
-  const category = page.locator('#body-appearance');
-  await category.getByRole('button', { name: 'タグを並び替える', exact: true }).click();
-  await expect(category.getByRole('button', { name: 'blue eyes を前へ移動', exact: true })).toBeDisabled();
-  await category.getByRole('button', { name: 'blue eyes を後へ移動', exact: true }).tap();
-  await category.getByRole('button', { name: 'braid を前へ移動', exact: true }).tap();
+  await expect(page.getByRole('button', { name: 'タグを並び替える', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /を前へ移動|を後へ移動/ })).toHaveCount(0);
+  await dragTag(page, 'blue eyes', 'braid', info.project.name === 'mobile', false, `test-results/${info.project.name}-tag-drag.png`);
   await expect(input).toHaveValue('long hair, braid, blue eyes');
-  await expect(category.getByRole('button', { name: 'blue eyes を後へ移動', exact: true })).toBeDisabled();
-  await page.screenshot({ path: `test-results/${info.project.name}-tag-order.png`, fullPage: true });
-  await category.getByRole('button', { name: '並び替えを完了' }).click();
+  await expect(page.locator('#body-appearance .sortable-tags button')).toHaveCount(3);
   await page.getByRole('button', { name: '出力', exact: true }).click();
   await expect(page.getByLabel('ポジティブの最終出力', { exact: true })).toHaveValue('long hair, braid, blue eyes');
   await page.getByRole('button', { name: '閉じる', exact: true }).click();
@@ -25,6 +49,22 @@ test('タグをタップで前後移動し、出力・保存・再読込が追�
   expect(snapshot.memos[0].positive).toBe('long hair, braid, blue eyes');
   expect(snapshot.memos[0].fields.appearance).toBe('long hair, braid, blue eyes');
   await page.reload(); await expect(input).toHaveValue('long hair, braid, blue eyes');
+});
+
+test('折り返した行へ移動・キャンセル・通常タップ削除', async ({ page }, info) => {
+  await page.goto('./'); await page.setViewportSize({ width: 390, height: 844 });
+  const input = page.getByLabel('外見のタグ', { exact: true });
+  await input.fill('blue_eyes, very_long_hair, black_ribbon, single_braid, hair_ornament');
+  await dragTag(page, 'blue eyes', 'hair ornament', info.project.name === 'mobile', true);
+  await expect(input).toHaveValue('blue_eyes, very_long_hair, black_ribbon, single_braid, hair_ornament');
+  await dragTag(page, 'hair ornament', 'blue eyes', info.project.name === 'mobile');
+  await expect(input).toHaveValue('hair ornament, blue eyes, very long hair, black ribbon, single braid');
+  await page.waitForTimeout(450);
+  await page.locator('#body-appearance .sortable-tags').getByRole('button', { name: 'blue eyes を削除', exact: true }).tap();
+  await expect(input).toHaveValue('hair ornament, very long hair, black ribbon, single braid');
+  await input.fill('only_tag');
+  await page.locator('#body-appearance .sortable-tags').getByRole('button', { name: 'only tag を削除', exact: true }).tap();
+  await expect(input).toHaveValue('');
 });
 
 test('カードのリンク表示とURLなしフィルタ', async ({ page }, info) => {
@@ -59,5 +99,34 @@ test('従来データの読込と書き出し日時の記録・再読込', async
   await page.screenshot({ path: `test-results/${info.project.name}-backup-time.png`, fullPage: true });
   await page.reload(); await page.getByRole('button', { name: '設定・バックアップ' }).click();
   await expect(page.locator('.backup-status time')).toHaveAttribute('datetime', s.settings.lastBackupAt);
-  await expect(page.getByText('Anima Prompt Tool · v1.2.0', { exact: true })).toBeVisible();
+  await expect(page.getByText('Anima Prompt Tool · v1.3.0', { exact: true })).toBeVisible();
+});
+
+
+test('長押し前のスワイプはスクロール、ドラッグ中は画面端で自動スクロール', async ({ page }) => {
+  await page.goto('./'); await page.setViewportSize({ width: 390, height: 844 });
+  const input = page.getByLabel('外見のタグ', { exact: true });
+  const value = Array.from({ length: 45 }, (_, i) => 'tag ' + i).join(', ');
+  await input.fill(value);
+  const chip = page.locator('#body-appearance .sortable-tags button').first();
+  await chip.evaluate(el => el.scrollIntoView({ block: 'center' }));
+  await page.waitForTimeout(250);
+  const cdp = await page.context().newCDPSession(page);
+  let a = (await chip.boundingBox())!; let point = { x: a.x + a.width/2, y: a.y + a.height/2 };
+  const beforeSwipe = await page.evaluate(() => scrollY);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point] });
+  for(let step=1;step<=6;step++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: point.x, y: point.y-step*25 }] });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(beforeSwipe + 30);
+  await expect(page.locator('.tag-drag-overlay')).toHaveCount(0); await expect(input).toHaveValue(value);
+  await chip.evaluate(el => el.scrollIntoView({ block: 'center' }));
+  await page.waitForTimeout(250);
+  a = (await chip.boundingBox())!; point = { x: a.x+a.width/2, y: a.y+a.height/2 };
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point] });
+  await expect(page.locator('.tag-drag-overlay')).toBeVisible();
+  const beforeAuto = await page.evaluate(() => scrollY);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: point.x, y: 820 }] });
+  await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(beforeAuto + 80);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
+  await expect(input).toHaveValue(value); await cdp.detach();
 });

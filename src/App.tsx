@@ -1,16 +1,17 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { ArrowDownToLine, ArrowUpFromLine, BookOpen, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, Copy, ExternalLink, FilePlus2, Leaf, Moon, Plus, Save, Search, Settings, SlidersHorizontal, Sparkles, Star, Sun, Trash2, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpFromLine, BookOpen, Check, ChevronDown, ChevronRight, Copy, ExternalLink, FilePlus2, Leaf, Moon, Plus, Save, Search, Settings, SlidersHorizontal, Sparkles, Star, Sun, Trash2, X } from 'lucide-react';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import MemoCollection, { EMPTY_MEMO_FILTER } from './MemoCollection';
 import MemoDetailsEditor from './MemoDetailsEditor';
+import SortableTags from './SortableTags';
 import YamlImportPanel from './YamlImportPanel';
 import { applyPromptImport } from './yamlImport';
 import { updateMemoDetails } from './domain';
-import { CATEGORIES, ids, initialState, parseTags, outputs, moveTag, toggleTag, completeTag, suggestions, searchHistory, saveMemo, deleteMemo, loadMemo, newDraft, safeUrl, normalizeTag, keyOf, type AppState, type Category, type Memo, type MemoFilter, type TagSort } from './domain';
+import { CATEGORIES, ids, initialState, parseTags, outputs, toggleTag, completeTag, suggestions, searchHistory, saveMemo, deleteMemo, loadMemo, newDraft, safeUrl, normalizeTag, keyOf, type AppState, type Category, type Memo, type MemoFilter, type TagSort } from './domain';
 import { STORAGE_KEY, MAX_BACKUP_BYTES, browserStorage, loadState, persistState, exportBackup, importBackup, downloadText, copyText } from './storage';
 
 const label = (id: Category) => CATEGORIES.find(c => c[0] === id)![1];
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.3.0';
 const dateTime = (value: string) => new Date(value).toLocaleString('ja-JP', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 type Commit = (updater: (s: AppState) => AppState) => boolean;
 const ToastContext = createContext('');
@@ -25,17 +26,12 @@ function Modal({ title, children, onClose, wide = false }: { title: string; chil
 }
 
 function CategoryEditor({ category, index, state, commit, openHistory }: { category: Category; index: number; state: AppState; commit: Commit; openHistory: () => void }) {
-  const [reordering, setReordering] = useState(false); const [moveMessage, setMoveMessage] = useState('');
   const [cursor, setCursor] = useState(0); const [focused, setFocused] = useState(false); const [composing, setComposing] = useState(false); const [highlight, setHighlight] = useState(0);
   const ref = useRef<HTMLTextAreaElement>(null);
   const value = state.draft.fields[category]; const open = state.settings.open.includes(category);
   const tags = parseTags(value, category); const frequent = searchHistory(state.history, category).slice(0, 7);
   const candidates = focused && !composing ? suggestions(state.history, category, value, cursor) : [];
   const setValue = (text: string) => commit(s => ({ ...s, draft: { ...s.draft, fields: { ...s.draft.fields, [category]: text } } }));
-  function move(position: number, direction: -1 | 1) {
-    try { setValue(moveTag(value, category, position, direction)); setMoveMessage(`${tags[position]} を${position + direction + 1}番目へ移動しました`); }
-    catch (error) { setMoveMessage((error as Error).message); }
-  }
   function accept(tag: string) {
     const next = completeTag(value, cursor, tag, category); setValue(next.text); setCursor(next.cursor); setFocused(false);
     requestAnimationFrame(() => { ref.current?.focus(); ref.current?.setSelectionRange(next.cursor, next.cursor); });
@@ -56,16 +52,7 @@ function CategoryEditor({ category, index, state, commit, openHistory }: { categ
         onKeyDown={e => { if (composing || e.nativeEvent.isComposing || !candidates.length) return; if (e.key === 'ArrowDown') { e.preventDefault(); setHighlight((highlight + 1) % candidates.length); } if (e.key === 'ArrowUp') { e.preventDefault(); setHighlight((highlight + candidates.length - 1) % candidates.length); } if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); accept(candidates[Math.min(highlight, candidates.length - 1)].tag); } if (e.key === 'Escape') setFocused(false); }} />
       {!!candidates.length && <div id={`suggest-${category}`} className="suggestions" role="listbox" aria-label="入力補完候補">{candidates.map((t, i) => <button key={t.id} id={`candidate-${category}-${i}`} role="option" aria-selected={i === highlight} className={i === highlight ? 'highlight' : ''} onPointerDown={e => e.preventDefault()} onClick={() => accept(t.tag)}><span>{t.tag}</span><small>{label(t.category)}{t.favorite ? ' ★' : ''}</small></button>)}</div>}
       <p className="input-hint" id={`hint-${category}`}>カンマ・改行で区切り。変換は出力に反映されます。</p>
-      {(tags.length > 1 || reordering) && <button className="text-button" aria-pressed={reordering} aria-controls={`tag-order-${category}`} onClick={() => setReordering(!reordering)}>{reordering ? '並び替えを完了' : 'タグを並び替える'}</button>}
-      <p className="muted" role="status">{moveMessage}</p>
-      {reordering && tags.length > 0 ? <div id={`tag-order-${category}`} className="tag-order" role="group" aria-label={`${label(category)}のタグ順`}>
-        <p className="muted">矢印をタップして前後に移動できます。</p>
-        {tags.map((tag, position) => <div className="tag-order-row" key={tag}>
-          <button className="icon-button secondary" aria-label={`${tag} を前へ移動`} disabled={position === 0} onClick={() => move(position, -1)}><ArrowLeft size={18} /></button>
-          <span><small>{position + 1}</small>{tag}</span>
-          <button className="icon-button secondary" aria-label={`${tag} を後へ移動`} disabled={position === tags.length - 1} onClick={() => move(position, 1)}><ArrowRight size={18} /></button>
-        </div>)}
-      </div> : !!tags.length && <div className="chips current-tags">{tags.map(t => <button key={t} className="chip selected" aria-label={`${t} を削除`} onClick={() => setValue(toggleTag(value, t, category))}>{t}<X size={12} /></button>)}</div>}
+      <SortableTags value={value} category={category} onChange={setValue} />
       <div className="palette-label"><span>よく使うタグ</span><button className="text-button" onClick={openHistory}>すべて表示 <ChevronRight size={14} /></button></div>
       {frequent.length ? <div className="chips">{frequent.map(t => <button key={t.id} className={`chip ${selected(t.tag) ? 'selected' : ''}`} aria-pressed={selected(t.tag)} onClick={() => setValue(toggleTag(value, t.tag, category))}>{selected(t.tag) ? <Check size={13} /> : <Plus size={13} />}{t.tag}</button>)}</div> : <p className="empty-inline">作品メモを保存すると、ここにタグが育ちます。</p>}
       <button className="text-button default-action" onClick={() => { if (confirm(`「${label(category)}」の現在の内容を、新規プロンプトの初期値に登録します。よろしいですか？`)) commit(s => ({ ...s, defaults: { ...s.defaults, [category]: value } })); }}><SlidersHorizontal size={13} />この内容を初期値にする</button>

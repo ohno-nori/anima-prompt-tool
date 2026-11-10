@@ -83,10 +83,10 @@ export function toggleTag(value: string, tag: string, category: Category): strin
   return (tags.some(t => keyOf(t) === keyOf(normalized)) ? tags.filter(t => keyOf(t) !== keyOf(normalized)) : [...tags, normalized]).join(', ');
 }
 // Reorder the same normalized, deduplicated sequence used by chips and outputs.
-export function moveTag(value: string, category: Category, index: number, direction: -1 | 1): string {
-  const tags = parseTags(value, category); const target = index + direction;
-  if (!Number.isInteger(index) || index < 0 || index >= tags.length || target < 0 || target >= tags.length) return value;
-  [tags[index], tags[target]] = [tags[target], tags[index]];
+export function reorderTag(value: string, category: Category, index: number, target: number): string {
+  const tags = parseTags(value, category);
+  if (!Number.isInteger(index) || !Number.isInteger(target) || index === target || index < 0 || index >= tags.length || target < 0 || target >= tags.length) return value;
+  const [tag] = tags.splice(index, 1); tags.splice(target, 0, tag);
   const next = tags.join(', ');
   const parsed = parseTags(next, category);
   if (parsed.length !== tags.length || parsed.some((tag, i) => tag !== tags[i])) throw new Error('括弧や引用符が閉じていないタグがあります。入力欄で修正してから並び替えてください。');
