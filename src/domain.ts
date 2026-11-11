@@ -156,6 +156,10 @@ export function loadMemo(state: AppState, memo: Memo, categories?: Category[]): 
   const fields = { ...state.draft.fields }; categories.forEach(c => fields[c] = memo.fields[c]);
   return { ...state, draft: { ...state.draft, fields } };
 }
+export function newDraftFromMemo(state: AppState, memo: Memo): AppState {
+  const next = loadMemo(state, memo);
+  return { ...next, draft: { ...next.draft, memoId: null } };
+}
 export function newDraft(state: AppState): AppState { return { ...state, draft: { fields: { ...state.defaults }, memoId: null, title: '', url: '', note: '' } }; }
 export type MemoFilter = { query: string; field: 'all' | 'title' | 'note' | 'prompt'; start: string; end: string; favorite: boolean; withoutUrl?: boolean; oldest: boolean };
 export function localDate(iso: string) { const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
