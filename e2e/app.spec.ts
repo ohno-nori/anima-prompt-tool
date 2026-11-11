@@ -81,9 +81,10 @@ test('作品検索・詳細・複製・部分読込・投稿URL', async ({ page,
   await expect(page.getByLabel('品質・メタのタグ', { exact: true })).toHaveValue('');
   const copied = await data(page);
   expect(copied.draft.memoId).toBeNull(); expect(copied.draft.fields).toEqual(original.memos[0].fields);
-  expect(copied.draft.title).toBe('テスト作品'); expect(copied.draft.url).toBe('https://example.com/a_b'); expect(copied.draft.note).toBe('自然光のテスト');
+  expect(copied.draft.title).toBe(''); expect(copied.draft.url).toBe(''); expect(copied.draft.note).toBe('');
   expect(copied.memos).toEqual(original.memos); expect(copied.history).toEqual(original.history);
-  await page.reload(); expect((await data(page)).draft.memoId).toBeNull();
+  await page.reload();
+  const reloaded = await data(page); expect(reloaded.draft.memoId).toBeNull(); expect(reloaded.draft.title).toBe(''); expect(reloaded.draft.url).toBe(''); expect(reloaded.draft.note).toBe('');
   await save(page, '複写から作成した作品');
   const savedCopy = await data(page); expect(savedCopy.memos).toHaveLength(2);
   expect(savedCopy.memos.find((m: { id: string }) => m.id === original.memos[0].id)).toEqual(original.memos[0]);

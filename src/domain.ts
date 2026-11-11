@@ -158,7 +158,7 @@ export function loadMemo(state: AppState, memo: Memo, categories?: Category[]): 
 }
 export function newDraftFromMemo(state: AppState, memo: Memo): AppState {
   const next = loadMemo(state, memo);
-  return { ...next, draft: { ...next.draft, memoId: null } };
+  return { ...next, draft: { ...next.draft, memoId: null, title: '', url: '', note: '' } };
 }
 export function newDraft(state: AppState): AppState { return { ...state, draft: { fields: { ...state.defaults }, memoId: null, title: '', url: '', note: '' } }; }
 export type MemoFilter = { query: string; field: 'all' | 'title' | 'note' | 'prompt'; start: string; end: string; favorite: boolean; withoutUrl?: boolean; oldest: boolean };

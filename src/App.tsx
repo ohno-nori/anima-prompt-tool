@@ -11,7 +11,7 @@ import { CATEGORIES, ids, initialState, parseTags, outputs, toggleTag, completeT
 import { STORAGE_KEY, MAX_BACKUP_BYTES, browserStorage, loadState, persistState, exportBackup, importBackup, downloadText, copyText } from './storage';
 
 const label = (id: Category) => CATEGORIES.find(c => c[0] === id)![1];
-const APP_VERSION = '1.3.1';
+const APP_VERSION = '1.3.2';
 const dateTime = (value: string) => new Date(value).toLocaleString('ja-JP', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 type Commit = (updater: (s: AppState) => AppState) => boolean;
 const ToastContext = createContext('');
@@ -187,7 +187,7 @@ export default function App() {
     }} /><OutputBlock title="ポジティブ" text={detail.positive} onCopy={copy} /><OutputBlock title="ネガティブ" text={detail.negative} onCopy={copy} />{detail.note && <div className="note-content"><h3>自由メモ</h3><p>{detail.note}</p></div>}
       <div className="button-row"><button className={`secondary ${detail.favorite ? 'starred' : ''}`} aria-pressed={detail.favorite} onClick={() => commit(s => ({ ...s, memos: s.memos.map(m => m.id === detail.id ? { ...m, favorite: !m.favorite } : m) }))}><Star size={16} fill={detail.favorite ? 'currentColor' : 'none'} />{detail.favorite ? 'お気に入り解除' : 'お気に入り登録'}</button><button className="secondary" disabled={metadataDirty} onClick={() => edit(detail)}>全体を読み込んで編集</button><button className="secondary" onClick={() => setPartial(partial === null ? [] : null)}>カテゴリを選んで読み込む</button></div>
       {partial !== null && <div className="partial-load"><p>チェックしたカテゴリだけを置き換えます。タイトル・投稿URL・自由メモは変更しません。</p><div className="category-checks">{CATEGORIES.map(([id, name]) => <label className="check-label" key={id}><input type="checkbox" checked={partial.includes(id)} onChange={e => setPartial(e.target.checked ? [...partial, id] : partial.filter(c => c !== id))} />{name}</label>)}</div><button className="primary" disabled={!partial.length || metadataDirty} onClick={() => { if (confirm(`選択した${partial.length}カテゴリの現在の内容を置き換えます。よろしいですか？`)) { commit(s => loadMemo(s, detail, partial)); setDetailId(null); setPartial(null); setTab('editor'); setToast('選択したカテゴリを読み込みました'); } }}>選択カテゴリを置き換える</button></div>}
-      <div className="detail-bottom"><button className="secondary" disabled={metadataDirty} onClick={() => { if (confirm('編集中の全カテゴリ・タイトル・URL・コメントをこの作品メモの内容で置き換え、新規プロンプトを作成します。続けますか？')) { commit(s => newDraftFromMemo(s, detail)); setMetadataDirty(false); setDetailId(null); setPartial(null); setTab('editor'); setToast('メモを複写して新規プロンプトを作成しました'); } }}><Copy size={15} />複写して新規作成</button><button className="danger-button" disabled={metadataDirty} onClick={() => { if (confirm(`「${detail.title}」を削除します。この操作は取り消せません。`)) { commit(s => deleteMemo(s, detail.id)); setDetailId(null); setToast('作品メモを削除しました'); } }}><Trash2 size={15} />削除</button></div>
+      <div className="detail-bottom"><button className="secondary" disabled={metadataDirty} onClick={() => { if (confirm('編集中の全カテゴリをこの作品メモのタグで置き換え、タイトル・URL・コメントを空にして新規プロンプトを作成します。続けますか？')) { commit(s => newDraftFromMemo(s, detail)); setMetadataDirty(false); setDetailId(null); setPartial(null); setTab('editor'); setToast('メモを複写して新規プロンプトを作成しました'); } }}><Copy size={15} />複写して新規作成</button><button className="danger-button" disabled={metadataDirty} onClick={() => { if (confirm(`「${detail.title}」を削除します。この操作は取り消せません。`)) { commit(s => deleteMemo(s, detail.id)); setDetailId(null); setToast('作品メモを削除しました'); } }}><Trash2 size={15} />削除</button></div>
     </Modal>}
   </ToastContext.Provider>;
 }

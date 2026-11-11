@@ -99,7 +99,7 @@ test('従来データの読込と書き出し日時の記録・再読込', async
   await page.screenshot({ path: `test-results/${info.project.name}-backup-time.png`, fullPage: true });
   await page.reload(); await page.getByRole('button', { name: '設定・バックアップ' }).click();
   await expect(page.locator('.backup-status time')).toHaveAttribute('datetime', s.settings.lastBackupAt);
-  await expect(page.getByText('Anima Prompt Tool · v1.3.1', { exact: true })).toBeVisible();
+  await expect(page.getByText('Anima Prompt Tool · v1.3.2', { exact: true })).toBeVisible();
 });
 
 
